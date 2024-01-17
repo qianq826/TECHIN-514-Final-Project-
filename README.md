@@ -13,14 +13,16 @@ Both devices have a modern, sporty design highlighting their functionality.
 
 
 "sensor" device
-<img width="1920" alt="Slide 16_9 - 13" src="https://github.com/qianq826/TECHIN-514-Final-Project-/assets/148395429/0b431763-82e6-4d45-972e-3ed4c1c18e6e">
+
+<img width="1920" alt="Slide 16_9 - 13" src="https://github.com/qianq826/TECHIN-514-Final-Project-/assets/148395429/593dc804-bbee-4589-ac24-e8d095212179">
 
 <img width="1920" alt="Slide 16_9 - 11" src="https://github.com/qianq826/TECHIN-514-Final-Project-/assets/148395429/fddb753c-69e6-4754-ba64-a7ebb1408ac3">
 
 
 
 "display" device
-<img width="1920" alt="Slide 16_9 - 12" src="https://github.com/qianq826/TECHIN-514-Final-Project-/assets/148395429/d3123d56-c718-4863-98d3-2b7ce5ebf904">
+<img width="1920" alt="Slide 16_9 - 12" src="https://github.com/qianq826/TECHIN-514-Final-Project-/assets/148395429/ed6b6c35-3194-4fdd-be66-558d94c16ee7">
+
 
 <img width="1920" alt="Slide 16_9 - 10" src="https://github.com/qianq826/TECHIN-514-Final-Project-/assets/148395429/2fc880f4-4ba4-4551-87f8-5ea05e019dcf">
 
