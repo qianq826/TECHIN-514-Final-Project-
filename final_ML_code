@@ -1,0 +1,137 @@
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BNO055.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "a514_TEST_inferencing.h" // Include the Edge Impulse model header
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET    -1
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+Adafruit_BNO055 bno = Adafruit_BNO055(55);
+
+bool isRecording = false;
+bool initialRead = true;
+float movementThreshold = 10.0;
+imu::Vector<3> initialEuler;
+imu::Vector<3> initialAccel;
+
+void logData(const imu::Vector<3>& euler, const imu::Vector<3>& accel);
+void calculateAndLogDifferences(const imu::Vector<3>& initialEuler, const imu::Vector<3>& finalEuler, const imu::Vector<3>& initialAccel, const imu::Vector<3>& finalAccel);
+bool runModelInference();
+
+void setup() {
+  Serial.begin(115200);
+  if (!bno.begin()) {
+    Serial.println("No BNO055 detected");
+    while (1);
+  }
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("SSD1306 allocation failed");
+    for (;;);
+  }
+  display.display();
+  delay(2000); // Show initial screen
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+}
+
+void loop() {
+  imu::Vector<3> currentAccel = bno.getVector(Adafruit_BNO055::VECTOR_LINEARACCEL);
+  imu::Vector<3> currentEuler = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+  float accelMagnitude = sqrt(currentAccel.x()*currentAccel.x() + currentAccel.y()*currentAccel.y() + currentAccel.z()*currentAccel.z());
+
+  if (accelMagnitude > movementThreshold && !isRecording) {
+    isRecording = true;
+    initialRead = true;
+    Serial.println("Start Movement Detected");
+  }
+
+  if (isRecording && initialRead) {
+    initialEuler = currentEuler;
+    initialAccel = currentAccel;
+    initialRead = false;
+  }
+
+  if (isRecording) {
+    logData(currentEuler, currentAccel);
+  }
+
+  if (accelMagnitude < movementThreshold && isRecording) {
+    isRecording = false;
+    Serial.println("End Movement Detected");
+    calculateAndLogDifferences(initialEuler, currentEuler, initialAccel, currentAccel);
+    
+    bool isCorrectForm = runModelInference();
+    if (isCorrectForm) {
+        Serial.println("Correct Form Detected");
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        display.println(F("Correct Form!"));
+    } else {
+        Serial.println("Improvement Needed");
+        display.clearDisplay();
+        display.setCursor(0, 0);
+        display.println(F("Improvement Needed"));
+    }
+    display.display();
+  }
+
+  delay(100);
+}
+
+void logData(const imu::Vector<3>& euler, const imu::Vector<3>& accel) {
+  // Implementation remains the same
+  Serial.print("Euler X: ");
+  Serial.print(euler.x());
+  Serial.print(", Y: ");
+  Serial.print(euler.y());
+  Serial.print(", Z: ");
+  Serial.print(euler.z());
+  Serial.print(" | Accel X: ");
+  Serial.print(accel.x());
+  Serial.print(", Y: ");
+  Serial.print(accel.y());
+  Serial.print(", Z: ");
+  Serial.println(accel.z());
+}
+
+void calculateAndLogDifferences(const imu::Vector<3>& initialEuler, const imu::Vector<3>& finalEuler, const imu::Vector<3>& initialAccel, const imu::Vector<3>& finalAccel) {
+  // Implementation remains the same
+  Serial.print("Delta Euler X: ");
+  Serial.print(finalEuler.x() - initialEuler.x());
+  Serial.print(", Delta Y: ");
+  Serial.print(finalEuler.y() - initialEuler.y());
+  Serial.print(", Delta Z: ");
+  Serial.print(finalEuler.z() - initialEuler.z());
+  Serial.print(" | Delta Accel X: ");
+  Serial.print(finalAccel.x() - initialAccel.x());
+  Serial.print(", Y: ");
+  Serial.print(finalAccel.y() - initialAccel.y());
+  Serial.print(", Z: ");
+  Serial.println(finalAccel.z() - initialAccel.z());
+}
+      
+bool runModelInference() {
+  // Placeholder for the Edge Impulse model inference logic
+  // Adjust this implementation according to your model's input and output
+  float sensorData[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE]; // Example sensor data array
+  // Fill sensorData with your formatted sensor values...
+
+  // Example: Run inference (make sure to replace this with actual inference code)
+  ei_impulse_result_t result;
+  signal_t signal;
+  numpy::signal_from_buffer(sensorData, EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE, &signal);
+  EI_IMPULSE_ERROR res = run_classifier(&signal, &result, false);
+
+  if (res == EI_IMPULSE_OK) {
+      // Example interpretation for binary classification
+      return result.classification[0].value > 0.5;
+  } else {
+      Serial.println("Inference failed");
+      return false;
+  }
+}
