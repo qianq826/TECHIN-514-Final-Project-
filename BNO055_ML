@@ -1,0 +1,122 @@
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BNO055.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include "a514_TEST_inferencing.h" // Include the Edge Impulse model header
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET    -1
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+Adafruit_BNO055 bno = Adafruit_BNO055(55);
+
+bool isRecording = false;
+bool initialRead = true; // Flag to capture initial sensor reading
+float movementThreshold = 10.0; // Threshold for significant movement
+imu::Vector<3> initialEuler; // To store the initial Euler angles
+imu::Vector<3> initialAccel; // To store the initial acceleration
+
+// Function prototypes
+void logData(const imu::Vector<3>& euler, const imu::Vector<3>& accel);
+void calculateAndLogDifferences(const imu::Vector<3>& initialEuler, const imu::Vector<3>& finalEuler, const imu::Vector<3>& initialAccel, const imu::Vector<3>& finalAccel);
+void interpretAndActOnModelOutput(bool isCorrectForm);
+
+void setup() {
+  Serial.begin(115200);
+  
+  if(!bno.begin()) {
+    Serial.println("No BNO055 detected");
+    while(1);
+  }
+  
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;);
+  }
+
+  display.display();
+  delay(2000); // Show initial screen
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+}
+
+void loop() {
+  imu::Vector<3> currentAccel = bno.getVector(Adafruit_BNO055::VECTOR_LINEARACCEL);
+  imu::Vector<3> currentEuler = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+  float accelMagnitude = sqrt(currentAccel.x()*currentAccel.x() + currentAccel.y()*currentAccel.y() + currentAccel.z()*currentAccel.z());
+
+  if (accelMagnitude > movementThreshold && !isRecording) {
+    isRecording = true;
+    initialRead = true;
+    Serial.println("Start Movement Detected");
+  }
+
+  if (isRecording && initialRead) {
+    initialEuler = currentEuler;
+    initialAccel = currentAccel;
+    initialRead = false;
+  }
+
+  if (isRecording) {
+    logData(currentEuler, currentAccel);
+  }
+
+  if (accelMagnitude < movementThreshold && isRecording) {
+    isRecording = false;
+    Serial.println("End Movement Detected");
+    calculateAndLogDifferences(initialEuler, currentEuler, initialAccel, currentAccel);
+
+    // Here, you would call your model inference function and interpret the results
+    bool isCorrectForm = true; // Placeholder for actual model inference result
+
+    interpretAndActOnModelOutput(isCorrectForm);
+  }
+
+  delay(100);
+}
+
+void logData(const imu::Vector<3>& euler, const imu::Vector<3>& accel) {
+  Serial.print("Euler X: ");
+  Serial.print(euler.x());
+  Serial.print(", Y: ");
+  Serial.print(euler.y());
+  Serial.print(", Z: ");
+  Serial.print(euler.z());
+  Serial.print(" | Accel X: ");
+  Serial.print(accel.x());
+  Serial.print(", Y: ");
+  Serial.print(accel.y());
+  Serial.print(", Z: ");
+  Serial.println(accel.z());
+}
+
+void calculateAndLogDifferences(const imu::Vector<3>& initialEuler, const imu::Vector<3>& finalEuler, const imu::Vector<3>& initialAccel, const imu::Vector<3>& finalAccel) {
+  Serial.print("Delta Euler X: ");
+  Serial.print(finalEuler.x() - initialEuler.x());
+  Serial.print(", Delta Y: ");
+  Serial.print(finalEuler.y() - initialEuler.y());
+  Serial.print(", Delta Z: ");
+  Serial.print(finalEuler.z() - initialEuler.z());
+  Serial.print(" | Delta Accel X: ");
+  Serial.print(finalAccel.x() - initialAccel.x());
+  Serial.print(", Y: ");
+  Serial.print(finalAccel.y() - initialAccel.y());
+  Serial.print(", Z: ");
+  Serial.println(finalAccel.z() - initialAccel.z());
+}
+
+void interpretAndActOnModelOutput(bool isCorrectForm) {
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  if (isCorrectForm) {
+    display.println(F("Correct Form!"));
+    Serial.println(F("Correct Form Detected"));
+  } else {
+    display.println(F("Incorrect Form!"));
+    Serial.println(F("Incorrect Form Detected"));
+  }
+  display.display();
+}
