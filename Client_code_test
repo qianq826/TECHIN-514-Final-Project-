@@ -1,0 +1,120 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET    -1
+
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+static BLEUUID serviceUUID("7707f49f-d3fe-4f1b-8e7e-aed9b84d897b");
+static BLEUUID charUUID("e51ac1b4-002b-478c-a130-5bf86221ba97");
+bool doConnect = false;
+bool connected = false;
+BLERemoteCharacteristic* pRemoteCharacteristic;
+BLEAdvertisedDevice* myDevice;
+
+void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+  Serial.println("Notify callback for characteristic ");
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.println("Received BNO055 Data:");
+  display.write(pData, length);
+  display.display();
+}
+
+class MyClientCallback : public BLEClientCallbacks {
+  void onConnect(BLEClient* pclient) {
+    connected = true;
+  }
+
+  void onDisconnect(BLEClient* pclient) {
+    connected = false;
+    Serial.println("Disconnected");
+  }
+};
+
+bool connectToServer() {
+  Serial.println("Forming a connection to ");
+  Serial.println(myDevice->getAddress().toString().c_str());
+
+  BLEClient* pClient = BLEDevice::createClient();
+  Serial.println(" - Created client");
+  pClient->setClientCallbacks(new MyClientCallback());
+
+  if (pClient->connect(myDevice)) {
+    Serial.println(" - Connected to server");
+  } else {
+    Serial.println(" - Failed to connect");
+    return false;
+  }
+
+  BLERemoteService* pRemoteService = pClient->getService(serviceUUID);
+  if (!pRemoteService) {
+    Serial.print("Failed to find our service UUID: ");
+    return false;
+  }
+  Serial.println(" - Found our service");
+
+  pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
+  if (!pRemoteCharacteristic) {
+    Serial.print("Failed to find our characteristic UUID: ");
+    return false;
+  }
+  Serial.println(" - Found our characteristic");
+
+  if(pRemoteCharacteristic->canNotify())
+    pRemoteCharacteristic->registerForNotify(notifyCallback);
+
+  return true;
+}
+
+class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
+  void onResult(BLEAdvertisedDevice advertisedDevice) {
+    if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(serviceUUID)) {
+      BLEDevice::getScan()->stop();
+      myDevice = new BLEAdvertisedDevice(advertisedDevice);
+      doConnect = true;
+    }
+  }
+};
+
+void setup() {
+  Serial.begin(115200);
+  BLEDevice::init("");
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    for (;;);
+  }
+  display.display();
+  delay(2000);
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+
+  BLEScan* pBLEScan = BLEDevice::getScan();
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  pBLEScan->setActiveScan(true);
+  pBLEScan->start(5, false);
+}
+
+void loop() {
+  if (doConnect) {
+    if (connectToServer()) {
+      Serial.println("Connected to the BLE Server.");
+    } else {
+      Serial.println("Failed to connect to the server.");
+    }
+    doConnect = false;
+  }
+
+  delay(1000);
+}
