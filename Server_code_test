@@ -1,0 +1,83 @@
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BNO055.h>
+
+Adafruit_BNO055 bno = Adafruit_BNO055(55);
+
+BLEServer* pServer = nullptr;
+BLECharacteristic* pCharacteristic = nullptr;
+bool deviceConnected = false;
+bool oldDeviceConnected = false; // Declare the variable here
+unsigned long previousMillis = 0;
+const long interval = 2000;
+
+#define SERVICE_UUID        "7707f49f-d3fe-4f1b-8e7e-aed9b84d897b"
+#define CHARACTERISTIC_UUID "e51ac1b4-002b-478c-a130-5bf86221ba97"
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) override {
+      deviceConnected = true;
+    }
+    void onDisconnect(BLEServer* pServer) override {
+      deviceConnected = false;
+    }
+};
+
+void setup() {
+  Serial.begin(115200);
+  BLEDevice::init("ESP32_Server_BNO055");
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
+
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  pCharacteristic = pService->createCharacteristic(
+                      CHARACTERISTIC_UUID,
+                      BLECharacteristic::PROPERTY_READ |
+                      BLECharacteristic::PROPERTY_WRITE |
+                      BLECharacteristic::PROPERTY_NOTIFY);
+  pCharacteristic->addDescriptor(new BLE2902());
+
+  pService->start();
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  
+  BLEDevice::startAdvertising();
+  Serial.println("Waiting for a client connection to notify...");
+
+  if (!bno.begin()) {
+    Serial.println("Failed to initialize BNO055! Check your wiring or I2C ADDR!");
+    while (1);
+  }
+}
+
+void loop() {
+  if (deviceConnected) {
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousMillis >= interval) {
+      imu::Vector<3> euler = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+      char buf[64];
+      snprintf(buf, sizeof(buf), "Pitch:%.2f, Roll:%.2f, Yaw:%.2f", euler.x(), euler.y(), euler.z());
+      pCharacteristic->setValue(buf);
+      pCharacteristic->notify();
+      Serial.println(buf);
+      previousMillis = currentMillis;
+    }
+  }
+
+  // Handling the connection status
+  if (!deviceConnected && oldDeviceConnected) {
+    delay(500); // Give time for the BLE stack
+    pServer->startAdvertising(); // Restart advertising
+    Serial.println("Start advertising");
+    oldDeviceConnected = deviceConnected;
+  }
+  if (deviceConnected && !oldDeviceConnected) {
+    oldDeviceConnected = deviceConnected;
+  }
+}
