@@ -1,3 +1,4 @@
+#include <Arduino.h>
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEScan.h>
@@ -5,18 +6,65 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Stepper.h>
 
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 #define OLED_RESET    -1
-
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-static BLEUUID serviceUUID("7707f49f-d3fe-4f1b-8e7e-aed9b84d897b");
-static BLEUUID charUUID("e51ac1b4-002b-478c-a130-5bf86221ba97");
-bool doConnect = false;
-bool connected = false;
-BLEAdvertisedDevice* myDevice;
+const int stepsPerRevolution = 200;
+
+// Initialize the stepper library on the pins it is connected to
+// Adjust the pin numbers according to your board's specific GPIO mapping
+Stepper myStepper(stepsPerRevolution, D0, D1, D2, D3);
+
+// BLE UUIDs
+static BLEUUID serviceUUID("b3bf5494-d2d6-4a27-b850-5a02a3a95506");
+static BLEUUID charUUID("f65a7136-f2d0-428d-86ef-a93b9354f80c");
+
+static boolean doConnect = false;
+static boolean connected = false;
+static boolean doScan = false;
+static BLERemoteCharacteristic* pRemoteCharacteristic;
+static BLEAdvertisedDevice* Sebbb;
+
+void notifyCallback(
+  BLERemoteCharacteristic* pBLERemoteCharacteristic,
+  uint8_t* pData,
+  size_t length,
+  bool isNotify) {
+    pData[length] = '\0'; // Ensure null-termination for a proper string
+    String message = String((char*)pData);
+    Serial.print("Notify callback for characteristic ");
+    Serial.print(pBLERemoteCharacteristic->getUUID().toString().c_str());
+    Serial.print(" of data length ");
+    Serial.println(length);
+    Serial.print("data: ");
+    Serial.println(message);
+
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.println("Received Data:");
+    display.println(message);
+    display.display();
+
+ if (message == "Improvement Needed") {
+  Serial.println("Improvement Needed: Triggering stepper motor...");
+  // Make the stepper motor complete one full revolution
+  myStepper.step(stepsPerRevolution);
+  delay(1000); // Wait for a second
+  // Step one revolution in the opposite direction:
+  myStepper.step(-stepsPerRevolution);
+  delay(1000); // Wait for a second
+} else if (message == "Correct Form") {
+  Serial.println("Correct Form: No action needed.");
+  // No action required for the stepper motor, just showing the message on the display
+}
+
+}
 
 class MyClientCallback : public BLEClientCallbacks {
   void onConnect(BLEClient* pclient) {
@@ -29,73 +77,101 @@ class MyClientCallback : public BLEClientCallbacks {
   }
 };
 
-void notifyCallback(BLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
-  Serial.println("Notify callback for characteristic ");
-  display.clearDisplay();
-  display.setCursor(0, 0);
-  display.println("Received Data:");
-  pData[length] = 0; // Ensure string is null-terminated
-  display.println((char*)pData);
-  display.display();
+bool connectToServer() {
+    Serial.print("Forming a connection to ");
+    Serial.println(Sebbb->getAddress().toString().c_str());
+
+    BLEClient*  pClient  = BLEDevice::createClient();
+    Serial.println(" - Created client");
+
+    pClient->setClientCallbacks(new MyClientCallback());
+
+    // Connect to the remote BLE Server.
+    pClient->connect(Sebbb); 
+    Serial.println(" - Connected to server");
+
+    // Obtain a reference to the service we are after in the remote BLE server.
+    BLERemoteService* pRemoteService = pClient->getService(serviceUUID);
+    if (pRemoteService == nullptr) {
+      Serial.print("Failed to find our service UUID: ");
+      Serial.println(serviceUUID.toString().c_str());
+      pClient->disconnect();
+      return false;
+    }
+    Serial.println(" - Found our service");
+
+    // Obtain a reference to the characteristic in the service of the remote BLE server.
+    pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
+    if (pRemoteCharacteristic == nullptr) {
+      Serial.print("Failed to find our characteristic UUID: ");
+      Serial.println(charUUID.toString().c_str());
+      pClient->disconnect();
+      return false;
+    }
+    Serial.println(" - Found our characteristic");
+
+    if(pRemoteCharacteristic->canNotify())
+      pRemoteCharacteristic->registerForNotify(notifyCallback);
+
+    connected = true;
+    return true;
 }
 
-bool connectToServer(BLEAdvertisedDevice* myDevice) {
-  BLEClient* pClient = BLEDevice::createClient();
-  Serial.println(" - Created client");
+class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
+  void onResult(BLEAdvertisedDevice advertisedDevice) {
+    Serial.print("BLE Advertised Device found: ");
+    Serial.println(advertisedDevice.toString().c_str());
 
-  pClient->setClientCallbacks(new MyClientCallback());
-  // Connect to the BLE Server.
-  pClient->connect(myDevice); 
-  Serial.println(" - Connected to server");
-
-  BLERemoteService* pRemoteService = pClient->getService(serviceUUID);
-  if (pRemoteService == nullptr) {
-    Serial.print("Failed to find our service UUID: ");
-    pClient->disconnect();
-    return false;
+    if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(serviceUUID)) {
+      BLEDevice::getScan()->stop();
+      Sebbb = new BLEAdvertisedDevice(advertisedDevice);
+      doConnect = true;
+      doScan = false;
+    }
   }
-  Serial.println(" - Found our service");
-
-  BLERemoteCharacteristic* pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
-  if (pRemoteCharacteristic == nullptr) {
-    Serial.print("Failed to find our characteristic UUID: ");
-    pClient->disconnect();
-    return false;
-  }
-  Serial.println(" - Found our characteristic");
-
-  if(pRemoteCharacteristic->canNotify())
-    pRemoteCharacteristic->registerForNotify(notifyCallback);
-
-  return true;
-}
+};
 
 void setup() {
   Serial.begin(115200);
+  Serial.println("Starting Arduino BLE Client application...");
   BLEDevice::init("");
 
-  display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {  
+    Serial.println(F("SSD1306 allocation failed"));
+    for(;;); // Don't proceed, loop forever
+  }
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(WHITE);
+  display.setCursor(0,0);
+  display.println("BLE Client Ready");
   display.display();
+  delay(2000); // Display message for 2 seconds
 
+  myStepper.setSpeed(60); // Set the speed in RPM
+
+  // Start BLE scan
   BLEScan* pBLEScan = BLEDevice::getScan();
-  pBLEScan->setActiveScan(true); // Active scan uses more power, but get results faster
-  BLEScanResults foundDevices = pBLEScan->start(5, false);
-  for (int i = 0; i < foundDevices.getCount(); i++) {
-    BLEAdvertisedDevice advertisedDevice = foundDevices.getDevice(i);
-    if (advertisedDevice.haveServiceUUID() && advertisedDevice.getServiceUUID().equals(serviceUUID)) {
-      myDevice = new BLEAdvertisedDevice(advertisedDevice);
-      break;
-    }
-  }
-  if (myDevice != nullptr) {
-    connectToServer(myDevice);
-  }
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  pBLEScan->setActiveScan(true);
+  pBLEScan->start(5, false);
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-  delay(2000); // Consider your application's needs
+  if (doConnect == true) {
+    if (connectToServer()) {
+      Serial.println("We are now connected to the BLE Server.");
+    } else {
+      Serial.println("We have failed to connect to the server; there is nothing more we will do.");
+    }
+    doConnect = false;
+  }
+
+  if (connected) {
+    // If you have any periodic checks or updates you want to do while connected, add them here.
+  } else if (doScan) {
+    BLEDevice::getScan()->start(0); // 0 means continuous scanning
+  }
+
+  delay(1000); // Delay a second between loops
 }
